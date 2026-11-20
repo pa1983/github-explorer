@@ -17,6 +17,13 @@ class Repository(BaseModel):
     archived: bool
 
 
+class RepositoryPage(BaseModel):
+    items: list[Repository]
+    page: int
+    page_size: int
+    total: int
+
+
 class PaginationState(BaseModel):
     next_url: str | None = None
     previous_url: str | None = None

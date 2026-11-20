@@ -39,6 +39,23 @@ To also apply `LOG_LEVEL` and `LOG_FORMAT` from `.env`, use
 `uv run --env-file .env python -m github_client google` so the settings are
 available before the logger is configured.
 
+## Check the API route
+
+With the backend running, use a small organisation (e.g. fastapi) to check the integration:
+
+```sh
+curl -f 'http://127.0.0.1:8000/api/orgs/psf/repos?page=1&page_size=25'
+```
+
+The response contains `items`, `page`, `page_size`, and `total`. Pages start at
+1; the default page size is 25 and the maximum is 100. A page beyond the end
+returns an empty `items` array. Use `page * page_size < total` to check whether
+there is another page.
+
+The route still fetches all GitHub pages on each request before slicing the
+results. The three-page limit applies only to the standalone runner. Filtering
+and sorting are not implemented yet.
+
 ## Application logs
 
 Application logs go to stderr as human-readable text by default. Each entry
