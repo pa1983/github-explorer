@@ -3,10 +3,31 @@ from typing import Annotated
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 
+from cache import TTLCache
 from github_client import get_repositories
-from models import RepositoryPage
+from logging_setup import configure_logging
+from models import Repository, RepositoryPage
 
+logger = configure_logging()
 app = FastAPI(title="app")
+
+CACHE_TTL_SECONDS = 3600
+CACHE_MAX_ORGS = 32
+repository_cache = TTLCache[list[Repository]](CACHE_TTL_SECONDS, CACHE_MAX_ORGS)
+
+
+async def get_cached_repositories(org: str) -> list[Repository]:
+    key = org.lower()
+    cached = repository_cache.get(key)
+    if cached is not None:
+        logger.debug(f"Cache hit for organization: {key}")
+        return cached
+    else:
+        logger.debug(f"Cache miss for organization: {key}")
+
+    repositories = await get_repositories(org)
+    repository_cache.set(key, repositories)
+    return repositories
 
 
 @app.get("/")
@@ -21,7 +42,7 @@ async def list_repositories(
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> RepositoryPage:
     try:
-        repositories = await get_repositories(org)
+        repositories = await get_cached_repositories(org)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
             raise HTTPException(status_code=404, detail="GitHub organisation not found.") from exc

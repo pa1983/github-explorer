@@ -52,9 +52,15 @@ The response contains `items`, `page`, `page_size`, and `total`. Pages start at
 returns an empty `items` array. Use `page * page_size < total` to check whether
 there is another page.
 
-The route still fetches all GitHub pages on each request before slicing the
-results. The three-page limit applies only to the standalone runner. Filtering
-and sorting are not implemented yet.
+On a cache miss, the route fetches all GitHub pages and caches the full list
+for five minutes per organisation before slicing the results. Requests for
+other pages of the same organisation reuse that list. The in-memory cache
+holds up to 32 organisations per process; it is not shared across workers
+and is cleared on restart. Failed fetches are not cached, and simultaneous
+misses can fetch the same organisation more than once.
+
+The three-page limit applies only to the standalone runner. Filtering and
+sorting are not implemented yet.
 
 ## Application logs
 

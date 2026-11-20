@@ -6,6 +6,8 @@ from unittest.mock import patch
 import httpx
 
 from github_client import get_repositories
+from main import app
+from models import Repository
 
 
 def repository_payload(repository_id: int) -> dict[str, object]:
@@ -67,6 +69,39 @@ class GitHubClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(client.requests), 2)
         self.assertEqual(client.requests[0][0], first_url)
         self.assertEqual(client.requests[1], (second_url, None))
+
+
+class RepositoryCacheTest(unittest.IsolatedAsyncioTestCase):
+    async def test_pages_share_the_cache_until_it_expires(self) -> None:
+        first = Repository.model_validate(repository_payload(1))
+        second = Repository.model_validate(repository_payload(2))
+        updated = Repository.model_validate(repository_payload(3))
+
+        with (
+            patch("main.repository_cache", {}),
+            patch("main.monotonic", return_value=100) as clock,
+            patch("main.get_repositories", side_effect=[[first, second], [updated]]) as fetch,
+        ):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as api:
+                page_one = await api.get("/api/orgs/example/repos?page_size=1")
+                clock.return_value = 399
+                page_two = await api.get("/api/orgs/Example/repos?page=2&page_size=1")
+                fetch.assert_awaited_once_with("example")
+
+                clock.return_value = 400
+                refreshed = await api.get("/api/orgs/example/repos?page_size=1")
+
+        self.assertEqual(fetch.await_count, 2)
+        for result, repository_id, total in (
+            (page_one, 1, 2),
+            (page_two, 2, 2),
+            (refreshed, 3, 1),
+        ):
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual([repo["id"] for repo in result.json()["items"]], [repository_id])
+            self.assertEqual(result.json()["total"], total)
 
 
 if __name__ == "__main__":
