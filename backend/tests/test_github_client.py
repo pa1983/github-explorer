@@ -1,4 +1,6 @@
+import os
 import unittest
+from functools import partial
 from unittest.mock import patch
 
 import httpx

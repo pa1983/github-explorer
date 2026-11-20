@@ -26,11 +26,25 @@ To confirm the token loads from `.env` without printing it, run this from the
 env -u GITHUB_TOKEN uv run --env-file .env python -m config
 ```
 
+To test the GitHub client directly, open `github_client.py` in VS Code and use
+**Run Python File**, or run this from `backend/`. The runner loads `.env` from
+next to the script without overriding environment variables that are already
+set, and fetches at most three pages for the given organization:
+
+```sh
+uv run python -m github_client google
+```
+
+To also apply `LOG_LEVEL` and `LOG_FORMAT` from `.env`, use
+`uv run --env-file .env python -m github_client google` so the settings are
+available before the logger is configured.
+
 ## Application logs
 
 Application logs go to stderr as human-readable text by default. Each entry
-includes a UTC timestamp, level, logger name, and message. Startup reports
-whether a GitHub token is configured without logging its value.
+includes a UTC timestamp, level, logger name, and message. When fetching
+repositories, the GitHub client logs at `INFO` whether it applied the token,
+without logging its value.
 
 Set `LOG_LEVEL` in `.env` to change the application log level (for example,
 `LOG_LEVEL=INFO`). If `LOG_LEVEL` is unset, it defaults to `DEBUG`. Restart the
