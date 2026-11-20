@@ -1,0 +1,17 @@
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class Repository(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    full_name: str
+    html_url: str
+    description: str | None = None
+    language: str | None = None
+    stargazers_count: int
+    updated_at: datetime
+    archived: bool
