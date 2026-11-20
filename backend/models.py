@@ -15,3 +15,10 @@ class Repository(BaseModel):
     stargazers_count: int
     updated_at: datetime
     archived: bool
+
+
+class PaginationState(BaseModel):
+    next_url: str | None = None
+    previous_url: str | None = None
+    first_url: str | None = None
+    last_url: str | None = None

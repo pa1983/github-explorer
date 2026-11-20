@@ -42,3 +42,8 @@ To emit one JSON object per log line, set `LOG_FORMAT=json` in `.env` and
 restart the backend. A log collector can later forward that stream to Amazon
 CloudWatch Logs; this application does not send logs to AWS directly. This
 setting does not change Uvicorn's own server or access logs.
+
+
+## Implementation Notes
+# httpx
+Using HTTPX in favour of requests to allow for future use of async 
