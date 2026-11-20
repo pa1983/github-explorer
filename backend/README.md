@@ -44,23 +44,36 @@ available before the logger is configured.
 With the backend running, use a small organisation (e.g. fastapi) to check the integration:
 
 ```sh
-curl -f 'http://127.0.0.1:8000/api/orgs/psf/repos?page=1&page_size=25'
+curl -f 'http://127.0.0.1:8000/api/orgs/psf/repos?language=python&min_stars=10&archived=false&sort=stars&order=desc&page=1&page_size=25'
 ```
 
 The response contains `items`, `page`, `page_size`, and `total`. Pages start at
 1; the default page size is 25 and the maximum is 100. A page beyond the end
-returns an empty `items` array. Use `page * page_size < total` to check whether
-there is another page.
+returns an empty `items` array. `total` counts all matching repositories before
+pagination. Use `page * page_size < total` to check whether there is another page.
+
+| Parameter | Behavior |
+| --- | --- |
+| `language` | Omit for all languages, pass a name for a case-insensitive match, or pass `language=` for repositories with no primary language. |
+| `min_stars` | Inclusive non-negative minimum; defaults to `0`. |
+| `archived` | Pass `true` for archived or `false` for non-archived repositories. Omit for both. |
+| `sort` | `name` (default, case-insensitive), `stars`, or `updated`. |
+| `order` | `asc` (default) or `desc`. Ties always use ascending repository ID. |
+
+Missing, empty, and whitespace-only descriptions and languages are returned as
+`null`. The supported sort fields (name, stars, last updated) are required and
+non-null; if a nullable sort field is added, missing values should sort last
+in both directions.
 
 On a cache miss, the route fetches all GitHub pages and caches the full list
-for five minutes per organisation before slicing the results. Requests for
-other pages of the same organisation reuse that list. The in-memory cache
+for one hour per organisation. Each request filters and sorts a separate list
+before slicing it, so changes to filters, sorting, or page reuse the same
+cached data. The in-memory cache
 holds up to 32 organisations per process; it is not shared across workers
 and is cleared on restart. Failed fetches are not cached, and simultaneous
 misses can fetch the same organisation more than once.
 
-The three-page limit applies only to the standalone runner. Filtering and
-sorting are not implemented yet.
+The three-page limit applies only to the standalone runner.
 
 ## Application logs
 
