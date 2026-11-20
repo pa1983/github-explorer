@@ -1,9 +1,11 @@
+import './App.css'
+
 export function App() {
   return (
-    <main>
-      <h1>GitHub Explorer</h1>
+    <main className="app-shell">
+      <h1>GitHub organisation explorer</h1>
     </main>
-  );
+  )
 }
 
-export default App;
+export default App
