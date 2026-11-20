@@ -70,6 +70,47 @@ class GitHubClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.requests[1], (second_url, None))
 
 
+class RepositoryRateLimitTest(unittest.IsolatedAsyncioTestCase):
+    async def test_github_rate_limit_returns_a_display_message(self) -> None:
+        url = "https://api.github.com/orgs/example/repos"
+        cases = (
+            (403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1121"},
+             {"message": "API rate limit exceeded"}, 429, "3 minutes", "121"),
+            (429, {"retry-after": "60", "x-ratelimit-remaining": "10", "x-ratelimit-reset": "2000"},
+             {"message": "Secondary rate limit"}, 429, "1 minute", "60"),
+            (403, {"x-ratelimit-reset": "invalid"},
+             {"message": "You have exceeded a secondary rate limit."}, 429, "1 minute", "60"),
+            (429, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "invalid"},
+             {"message": "API rate limit exceeded"}, 429, "1 minute", "60"),
+            (403, {"x-ratelimit-remaining": "10", "x-ratelimit-reset": "2000"},
+             {"message": "Forbidden"}, 502, None, None),
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as api:
+            for status, headers, body, expected_status, wait, retry_after in cases:
+                with self.subTest(status=status, headers=headers):
+                    upstream = httpx.Response(
+                        status, request=httpx.Request("GET", url), headers=headers, json=body
+                    )
+                    github = FakeAsyncClient([upstream])
+                    with (
+                        patch("github_client.httpx.AsyncClient", return_value=github),
+                        patch("github_client.time", return_value=1000),
+                        patch("main.repository_cache", TTLCache[list[Repository]](300, 32)),
+                    ):
+                        result = await api.get("/api/orgs/example/repos")
+
+                    self.assertEqual(result.status_code, expected_status)
+                    self.assertEqual(result.headers.get("retry-after"), retry_after)
+                    message = (
+                        f"GitHub's rate limit has been reached. Please try again in {wait}."
+                        if wait else "GitHub rejected the request."
+                    )
+                    self.assertEqual(result.json(), {"detail": message})
+                    self.assertEqual(len(github.requests), 1)
+
+
 class RepositoryCacheTest(unittest.IsolatedAsyncioTestCase):
     async def test_pages_share_the_cache_until_it_expires(self) -> None:
         first = Repository.model_validate(repository_payload(1))

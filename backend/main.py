@@ -4,7 +4,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 
 from cache import TTLCache
-from github_client import get_repositories
+from github_client import get_repositories, rate_limit_retry_seconds
 from logging_setup import configure_logging
 from models import Repository, RepositoryPage
 from repository_query import SortField, SortOrder, query_repositories
@@ -65,6 +65,20 @@ async def list_repositories(
     try:
         repositories = await get_cached_repositories(org)
     except httpx.HTTPStatusError as exc:
+        retry_seconds = rate_limit_retry_seconds(exc.response)
+        if retry_seconds is not None:
+            minutes = (retry_seconds + 59) // 60
+            wait = "1 minute" if minutes == 1 else f"{minutes} minutes"
+            logger.warning(
+                "GitHub rate limit reached: upstream_status=%d retry_after_seconds=%d",
+                exc.response.status_code,
+                retry_seconds,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"GitHub's rate limit has been reached. Please try again in {wait}.",
+                headers={"Retry-After": str(retry_seconds)},
+            ) from exc
         if exc.response.status_code == 404:
             raise HTTPException(status_code=404, detail="GitHub organisation not found.") from exc
         raise HTTPException(status_code=502, detail="GitHub rejected the request.") from exc

@@ -75,6 +75,21 @@ misses can fetch the same organisation more than once.
 
 The three-page limit applies only to the standalone runner.
 
+### GitHub rate limits
+
+If GitHub rate-limits a request, the API returns HTTP `429`. The response's
+`detail` field is plain text intended for direct display:
+
+```json
+{"detail": "GitHub's rate limit has been reached. Please try again in 3 minutes."}
+```
+
+The `Retry-After` header gives the wait in seconds. The API uses GitHub's
+`Retry-After` and, when the primary quota is exhausted, `X-RateLimit-Reset`.
+It uses the longer delay if both apply, rounds up to whole minutes for the
+message, and recommends one minute if no usable timing is supplied. The backend
+does not retry automatically.
+
 ## Application logs
 
 Application logs go to stderr as human-readable text by default. Each entry

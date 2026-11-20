@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from datetime import UTC, datetime
+from time import time
 from urllib.parse import quote
 
 import httpx
@@ -64,6 +64,7 @@ async def get_repositories(
                 first_url=response.links.get("first", {}).get("url"),
                 last_url=response.links.get("last", {}).get("url"),
             )
+            reset_in_seconds = _seconds_until_reset(response)
             logger.debug(
                 "GitHub GET succeeded: url=%s status=%d repositories=%d "
                 "remaining=%s reset_in_seconds=%s",
@@ -71,7 +72,7 @@ async def get_repositories(
                 response.status_code,
                 len(page),
                 response.headers.get("x-ratelimit-remaining", "unknown"),
-                _seconds_until_reset(response),
+                reset_in_seconds if reset_in_seconds is not None else "unknown",
             )
             if max_pages is not None and pages_fetched >= max_pages:
                 break
@@ -82,14 +83,40 @@ async def get_repositories(
     return repositories
 
 
-def _seconds_until_reset(response: httpx.Response) -> int | str:
+def _seconds_until_reset(response: httpx.Response) -> int | None:
     reset = response.headers.get("x-ratelimit-reset")
     if reset is None:
-        return "unknown"
+        return None
     try:
-        return max(0, int(int(reset) - datetime.now(UTC).timestamp()))
+        return max(0, int(reset) - int(time()))
     except ValueError:
-        return "unknown"
+        return None
+
+
+def rate_limit_retry_seconds(response: httpx.Response) -> int | None:
+    """Return a retry delay for a rate-limit response, or None for other errors."""
+    if response.status_code not in (403, 429):
+        return None
+
+    exhausted = response.headers.get("x-ratelimit-remaining") == "0"
+    try:
+        retry_after = int(response.headers.get("retry-after", ""))
+    except ValueError:
+        retry_after = -1
+
+    if response.status_code == 403 and not exhausted and retry_after < 0:
+        try:
+            body = response.json()
+        except ValueError:
+            return None
+        message = body.get("message") if isinstance(body, dict) else None
+        if not isinstance(message, str) or "secondary rate limit" not in message.lower():
+            return None
+
+    # GitHub reports the primary reset even when a secondary limit is hit.
+    reset_delay = _seconds_until_reset(response) if exhausted else None
+    delay = max(retry_after, reset_delay if reset_delay is not None else -1)
+    return max(1, delay) if delay >= 0 else 60
 
 
 async def main() -> None:
