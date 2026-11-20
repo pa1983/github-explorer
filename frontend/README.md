@@ -13,6 +13,12 @@ npm run dev
 Vite serves the application on port 5173 by default. Requests under `/api` are
 proxied to `http://localhost:8000`; the frontend does not call GitHub directly.
 
+Enter an organisation and select **Search**. Search keeps the form values and
+starts at page 1, so you can change the filters or sort without re-entering the
+organisation. **Previous** and **Next** use the last submitted settings.
+If GitHub rate-limits the backend, the page displays the backend's retry
+message and keeps your inputs.
+
 ## API types
 
 The backend owns the API contract. With its OpenAPI document available at

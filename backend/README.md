@@ -98,8 +98,22 @@ repositories, the GitHub client logs at `INFO` whether it applied the token,
 without logging its value.
 
 Set `LOG_LEVEL` in `.env` to change the application log level (for example,
-`LOG_LEVEL=INFO`). If `LOG_LEVEL` is unset, it defaults to `DEBUG`. Restart the
-backend after changing it.
+`LOG_LEVEL=INFO`). If `LOG_LEVEL` is unset or blank, it defaults to `DEBUG`.
+Restart the backend after changing it. Look for application logs in the
+terminal running the backend, not in the frontend terminal or browser console.
+With debug logging enabled, the application logs a confirmation at startup
+and cache activity when the repository endpoint is called.
+
+If you see only `INFO` and `WARNING`, an exported `LOG_LEVEL` can override
+the value in `.env`. To force application debug logging for a local run,
+stop the backend and run this from `backend/`:
+
+```sh
+LOG_LEVEL=DEBUG uv run uvicorn main:app --reload --env-file .env
+```
+
+Uvicorn's own logger is separate; add `--log-level debug` if you also want
+Uvicorn debug logs.
 
 Set `LOG_FORMAT=text` in `.env` for readable logs. Unset or blank values
 default to text; unsupported values also fall back to text and log a warning.

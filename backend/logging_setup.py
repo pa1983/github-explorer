@@ -49,7 +49,7 @@ def configure_logging() -> logging.Logger:
     log_format = os.getenv("LOG_FORMAT", "").strip().lower() or "text"
     formatter = JsonFormatter() if log_format == "json" else TextFormatter()
 
-    log_level = os.getenv("LOG_LEVEL", "DEBUG").strip().upper()
+    log_level = os.getenv("LOG_LEVEL", "").strip().upper() or "DEBUG"
     logger.setLevel(log_level)
 
     handler = logging.StreamHandler()
@@ -58,4 +58,5 @@ def configure_logging() -> logging.Logger:
     logger.propagate = False
     if log_format not in {"text", "json"}:
         logger.warning("Unsupported LOG_FORMAT; using text. Expected 'text' or 'json'.")
+    logger.debug("Application debug logging enabled.")
     return logger
