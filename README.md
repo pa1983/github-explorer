@@ -12,9 +12,10 @@ for the frontend.
 ```sh
 cd backend
 ```
-Create `.env` and set `GITHUB_TOKEN` to your GitHub token. If not using a Github token, omit this line. 
+Create `.env` and set `GITHUB_TOKEN` to your GitHub token. If not using a GitHub token, omit this line. 
+
+Sample `backend/.env`:
 ```
-Sample backend/.env
 GITHUB_TOKEN=github_pat_xxx
 LOG_LEVEL=DEBUG
 LOG_FORMAT=text
@@ -28,8 +29,12 @@ uv run uvicorn main:app --reload --env-file .env
 Run this from `backend/` so Uvicorn can find `main.py` and resolve `.env` in
 that directory. 
 
-Without `--env-file .env`, Uvicorn won't load the .env file and will fall back to a guest session with 60 request/hour rate limit. 
+Without `--env-file .env`, Uvicorn won't load the .env file and will fall back to a guest session with 60 requests/hour rate limit. 
 
+**tests** use unittest, so from `backend/` run
+``` uv run python -m unittest discover -s tests -v```
+Note - unit tests replace `httpx.AsyncClient` with a mock client that returns canned `httpx.Response` objects, avoiding
+live calls to the GitHub API.  
 
 ### Terminal 2: Frontend
 
@@ -60,33 +65,66 @@ Made use of AI to speed up code generation, but generated in chunks in line with
 
 Copilot wrote most of the tests - I reviewed briefly, but ran out of time to make tests as thorough as I would like and ensure they cover edge cases adequately. 
 Testing areas requiring particular attention: 
-    -- Handling of sorting around nullable fields
-## Backend
-### Synchronous API calls
-As implemented calls are made synchronously to the GH API; each call simply looks for the `next url` from the response headers and uses this for subsequent calls. 
+    -- Handling of 404 and 502 responses
+    -- Handling of connection errors to GitHub
 
-This could be improved through use of async calls to the API e.g. by parsing the total number of pages and starting an `httpx` connection pool to make multiple concurrent requests. 
+
+
+## Backend
+
+## Key design decisions
+- **Fetch everything, then filter in the backend.** GitHub's org repos endpoint can't filter by language, stars or archived, so the backend fetches all pages, caches them, then filters, sorts and pages locally. The cache makes changing filters or pages fast and free.
+
+- **Missing data.** Blank or empty descriptions and languages become null, and language= matches repos with no language. The sort fields can't be null, and ties sort by repo ID.
+
+- **Error mapping**  GitHub rate limits return 429 with Retry-After, a missing organisation returns 404, and other GitHub failures return 502.
+
+- **Without a token** Fetching google takes about 25 of the 60 requests per hour, so one or two large organisations per hour is realistic. The cache is what makes unauthenticated use workable.
+
+### Sequential API calls
+As implemented calls are made sequentially to the GitHub API; each call simply looks for the `next url` from the response headers and uses this for subsequent calls. 
+
+This could be improved through use of concurrent calls to the API e.g. by parsing the total number of pages and starting an `httpx` connection pool to make multiple concurrent requests. 
+
+### Retries
+No retries are made on temporary GitHub errors (e.g. 503); one failed page fails the whole fetch.
+
+This needs to be developed further with retries with exponential backoff before failure. 
+
+### Rate limit tracking
+Rate limit headers are logged but not stored. Planned: build a small `RateLimitInfo` dataclass
+(limit, remaining, reset_at) from each response and keep it on the client. This would allow
+checking whether enough calls remain *before* starting a large fetch, and resuming a fetch part-way through
+once the limit resets rather than starting again. 
+
+
+### Structure
+Cache and fetch logic currently sits in `main.py`. My plan was to split this into layers:
+- **API endpoint** - accepts the request and maps results to status codes 200, 202, 429, 502 (202 not yet implemented).
+- **Company service** - owns cache lookup, TTL and background jobs.
+- **GitHub client** - owns HTTP requests, pagination, retries and rate limit info. Should not know about the cache or jobs.
+
+The GitHub client also reads the token itself and opens a new `httpx.AsyncClient` per fetch; these could be passed in (one shared client, created at app startup).
 
 ### Caching
-I implemented basic caching early as it aided testing during development; without caching development would have been slowed by calls the Github API every
+I implemented caching early as it aided testing during development; without caching development would have been slowed by calls to the GitHub API every
 time the frontend called for another page, filter or sort. 
 
-As implemented, caching uses a simple dictionary to store repositories by organisation.  This works well in this demo but has a number of shortcomings that would 
-need to be addressed in a production-grade server: 
+As implemented, caching uses an in-memory dictionary to store repositories by organisation with handling for TTL and a limit on the number of entries (oldest entry evicted when cache limit is reached).  This works well in this demo but has a number of shortcomings that would need to be addressed in a production-grade server: 
 1. The cache is stored in local memory and will thus be lost when the server restarts (this is particularly significant if running the API from a short-lived AWS Lambda function)
 2. If the API is scaled horizontally across multiple compute instances (e.g. concurrent Lambda or Fargate instances) the cache cannot be shared.   
     **Further development** - Use of a centralised cache (e.g. Redis or AWS Elasticache) would solve both of these issues. 
-3. The current implementation doesn't handle hitting the rate limit during the population of a single organisation.  In its current state, the user will receive a rate limit error
-and the cache will be left partially filled, potentailly resulting in data inaccuracy.
-4. Multiple concurrent requests could be made for the same organisation, wasting GH API calls.
+3. The current implementation doesn't handle hitting the rate limit part-way through fetching an organisation. The user receives a rate limit error and any pages already fetched are discarded, wasting API calls (this was selected as the least-worst option initially as it 
+avoids a partially completed cache entry being served to the user).
+4. Multiple concurrent requests could be made for the same organisation, wasting GitHub API calls.
 
     **Improvements** - The caching structure could address both of these issues through implementation of a **jobs** structure.  This could be implemented as an extra layer above the cache.
-    Jobs could have statuses such as underway, complete.  
+    Jobs could have statuses such as `UNDERWAY`, `AWAITING_RATE_LIMIT`, `COMPLETE` and `FAILED`.  
     
     Searches for a company would first check if there's an existing job entry for that company.  If the job is underway, 
-    a message would be passed back to the user asking them to check back (potentailly estimating time to completion using the number of pages remaining to pull and the available API calls).
+    a message would be passed back to the user asking them to check back (potentially estimating time to completion using the number of pages remaining to pull and the available API calls).
     
-    Once a job completes, it's status is updated to complete. 
+    Once a job completes, its status is updated to complete. 
 
     If a job is found to be *complete* a check is then made against the *cache* and the data returned to the user.  If the cache entry is expired the old data could be passed 
     back to the user with a warning message that the data is outdated while a refresh job is requested to update the data. 
@@ -95,22 +133,31 @@ and the cache will be left partially filled, potentailly resulting in data inacc
 ## Logs
 currently set to level==DEBUG for dev test purposes - change to INFO or higher for production purposes.
 
-Currently only using the text out log stream; once deployed, use JSON for structured log, e.g. in Cloudwatch.
+Text output used for dev; JSON output is available via LOG_FORMAT=json for structured logs once deployed (e.g. CloudWatch).
+
+Only rate limit errors are logged. 404, 502 and connection errors are returned to the user without logging the cause; these need logging before production use.
 
 Logs are functional, but could be improved with human-friendly formatting for local dev use. 
 
 For production use, performance logging would be beneficial e.g. response times, cache hit vs. miss ratio.
 
 ## CORS
-Currently set up to work around CORS for dev purposes - need proper middleware setup
+Vite dev server proxies `/api`, so the browser never makes a cross-origin request. There is no CORS middleware in the backend; this
+would need to be added for production use. 
+
+
+## Further enhancements
+- **Scheduled refresh** - refresh popular organisations in the background before they expire.
+- **Persistent job storage** - store jobs alongside the cache (e.g. Redis/Elasticache) so they survive restarts.
+- **Metrics endpoint** - expose cache hit ratio, GitHub calls made and rate limit remaining.
 
 
 ## Frontend
-I used vite to quickly build the boilerplate front end (`npm create vite@latest`)
+I used Vite to quickly build the boilerplate front end (`npm create vite@latest`)
 
 Focussed on getting backend right first and ran out of time to focus on the front end.  
 
-Typescript interface models are built automatically from the Pydantic backend models for speed and accuracy, helping avoid drift. 
+TypeScript interface models are generated from the Pydantic backend models with `npm run generate:api` (from `shared/openapi.json`) for speed and accuracy, helping avoid drift. `shared/openapi.json` needs regenerating whenever the backend models change.
 
 Proved concept, but front end needs a mindful rebuild from scratch (poorly organised and laid out currently). 
 
@@ -118,4 +165,9 @@ Proved concept, but front end needs a mindful rebuild from scratch (poorly organ
 
 ## General
 ### Convenience
-Pick up a Github session from `gh auth login` rather than requiring a token to be specified in .env.
+Pick up a GitHub session from `gh auth login` rather than requiring a token to be specified in .env.
+
+### Tooling
+
+Dev tooling (`pytest`, `ruff`, `mypy`) is not yet listed in `pyproject.toml`; it should be added
+as dev dependencies (`uv add --dev pytest ruff mypy`) and run in the CI pipeline prior to merging. 
