@@ -36,6 +36,28 @@ Without `--env-file .env`, Uvicorn won't load the .env file and will fall back t
 Note - unit tests replace `httpx.AsyncClient` with a mock client that returns canned `httpx.Response` objects, avoiding
 live calls to the GitHub API.  
 
+#### Check the API route
+
+With the backend running, use a small organisation (e.g. fastapi) to check the integration:
+
+```sh
+curl -f 'http://127.0.0.1:8000/api/orgs/psf/repos?language=python&min_stars=10&archived=false&sort=stars&order=desc&page=1&page_size=25'
+```
+
+The response contains `items`, `page`, `page_size`, and `total`. Pages start at
+1; the default page size is 25 and the maximum is 100. A page beyond the end
+returns an empty `items` array. `total` counts all matching repositories before
+pagination. Use `page * page_size < total` to check whether there is another page.
+
+| Parameter | Behavior |
+| --- | --- |
+| `language` | Omit for all languages, pass a name for a case-insensitive match, or pass `language=` for repositories with no primary language. |
+| `min_stars` | Inclusive non-negative minimum; defaults to `0`. |
+| `archived` | Pass `true` for archived or `false` for non-archived repositories. Omit for both. |
+| `sort` | `name` (default, case-insensitive), `stars`, or `updated`. |
+| `order` | `asc` (default) or `desc`. Ties always use ascending repository ID. |
+
+
 ### Terminal 2: Frontend
 
 From the repo root, enter `frontend/`, where `package.json` defines
@@ -53,8 +75,16 @@ running on port `8000`; Vite forwards `/api` requests to it.
 Enter an organisation, choose any filters and sort order, and select **Search**.
 Use **Previous** and **Next** to page through the matching repositories.
 
-See the [backend README](backend/README.md) and [frontend README](frontend/README.md)
-for more details.
+
+#### Checks
+
+```sh
+npm run lint
+npm run build
+```
+
+UI tests are deliberately outside the four-hour exercise scope. Vitest and
+React Testing Library would be appropriate additions for a production project.
 
 
 
